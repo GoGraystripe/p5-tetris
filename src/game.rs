@@ -137,15 +137,16 @@ impl Game {
     }
 
     fn lock_piece(&mut self) {
-        if self.is_topped_out() {
-            self.game_over = true;
-            return;
-        }
-
+        let topped_out = self.is_topped_out();
         let blocks = self.current_piece.blocks(&self.shapes);
 
         self.board
             .place_piece(self.current_piece.row, self.current_piece.col, blocks);
+
+        if topped_out {
+            self.game_over = true;
+            return;
+        }
 
         self.board.remove_full_rows();
 

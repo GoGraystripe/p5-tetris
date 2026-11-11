@@ -54,28 +54,39 @@ impl Tetromino {
 
 pub struct PieceBag {
     pieces: Vec<String>,
+    index: usize,
     rng: Xoshiro128PlusPlus,
 }
 
 impl PieceBag {
     pub fn new(seed: [u8; 16]) -> Self {
+        let mut rng = Xoshiro128PlusPlus::from_seed(seed);
+
+        let mut pieces: Vec<String> = ["i", "j", "l", "o", "s", "t", "z"]
+            .iter()
+            .map(|piece| piece.to_string())
+            .collect();
+
+        pieces.shuffle(&mut rng);
+
         Self {
-            pieces: Vec::new(),
-            rng: Xoshiro128PlusPlus::from_seed(seed),
+            pieces,
+            index: 0,
+            rng,
         }
     }
 
     pub fn next_piece(&mut self) -> String {
-        if self.pieces.is_empty() {
-            // Refill the bag when all seven pieces have been used
-            self.pieces = ["i", "j", "l", "o", "s", "t", "z"]
-                .iter()
-                .map(|piece| piece.to_string())
-                .collect();
+        let piece = self.pieces[self.index].clone();
 
+        self.index += 1;
+
+        // Reshuffle the bag after drawing all seven pieces
+        if self.index >= self.pieces.len() {
             self.pieces.shuffle(&mut self.rng);
+            self.index = 0;
         }
 
-        self.pieces.pop().unwrap()
+        piece
     }
 }
