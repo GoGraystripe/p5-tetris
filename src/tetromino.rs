@@ -46,7 +46,6 @@ impl Tetromino {
         }
     }
 
-    // get the four blocks in the current rotation
     pub fn blocks<'a>(&self, shapes: &'a PieceShapes) -> &'a [[i32; 2]; 4] {
         &shapes[&self.piece_type].states[self.rotation]
     }

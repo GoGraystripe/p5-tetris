@@ -105,7 +105,6 @@ impl Board {
 
         let mut output = String::new();
 
-        // print from top to bottom
         for row in (0..TOTAL_HEIGHT).rev() {
             for col in 0..WIDTH {
                 if display[row][col] {

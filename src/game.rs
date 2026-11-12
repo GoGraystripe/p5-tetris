@@ -116,7 +116,7 @@ impl Game {
                 self.current_piece.row = row;
                 self.current_piece.col = col;
                 self.current_piece.rotation = new_rotation;
-                return;i
+                return;
             }
         }
     }
