@@ -108,7 +108,7 @@ impl Game {
         let new_offsets = &self.wall_kicks[kick_type][directions[new_rotation]];
 
         for i in 0..old_offsets.len() {
-            // Wall kicks use the difference between rotation offsets
+            // wall kicks use the difference between rotation offsets
             let col = self.current_piece.col + old_offsets[i][0] - new_offsets[i][0];
             let row = self.current_piece.row + old_offsets[i][1] - new_offsets[i][1];
 
@@ -116,12 +116,12 @@ impl Game {
                 self.current_piece.row = row;
                 self.current_piece.col = col;
                 self.current_piece.rotation = new_rotation;
-                return;
+                return;i
             }
         }
     }
 
-    // Check for blocks above the playable area
+    // check for blocks above the playable area
     fn is_topped_out(&self) -> bool {
         let blocks = self.current_piece.blocks(&self.shapes);
 

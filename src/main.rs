@@ -20,12 +20,12 @@ struct Args {
 fn main() {
     let args = Args::parse();
 
-    // Load the game config
+    // load the game config
     let config_path = args.resources.join("config.json");
     let config_file = fs::read_to_string(config_path).expect("Could not read config.json");
     let config: Config = serde_json::from_str(&config_file).expect("Invalid config.json");
 
-    // Load the tetromino shapes and wall kicks
+    // load the tetromino shapes and wall kicks
     let shapes = load_pieces(&args.resources);
     let wall_kicks = load_wall_kicks(&args.resources);
 

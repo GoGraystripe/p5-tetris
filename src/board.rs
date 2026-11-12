@@ -68,14 +68,14 @@ impl Board {
             }
 
             if full {
-                // Shift all rows above the cleared row down
+                // shift all rows above the cleared row down
                 for r in row..TOTAL_HEIGHT - 1 {
                     self.cells[r] = self.cells[r + 1];
                 }
 
                 self.cells[TOTAL_HEIGHT - 1] = [false; WIDTH];
                 cleared += 1;
-                // Recheck this row after shifting
+                // recheck this row after shifting
             } else {
                 row += 1;
             }
@@ -85,7 +85,7 @@ impl Board {
     }
 
     pub fn render(&self, active_piece: Option<(i32, i32, &[[i32; 2]; 4])>) -> String {
-        // Draw the active piece without changing the board
+        // draw the active piece without changing the board
         let mut display = self.cells;
 
         if let Some((row, col, offsets)) = active_piece {
@@ -105,7 +105,7 @@ impl Board {
 
         let mut output = String::new();
 
-        // Print from top to bottom
+        // print from top to bottom
         for row in (0..TOTAL_HEIGHT).rev() {
             for col in 0..WIDTH {
                 if display[row][col] {

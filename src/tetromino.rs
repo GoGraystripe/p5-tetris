@@ -46,7 +46,7 @@ impl Tetromino {
         }
     }
 
-    // Get the four blocks in the current rotation
+    // get the four blocks in the current rotation
     pub fn blocks<'a>(&self, shapes: &'a PieceShapes) -> &'a [[i32; 2]; 4] {
         &shapes[&self.piece_type].states[self.rotation]
     }
@@ -81,7 +81,7 @@ impl PieceBag {
 
         self.index += 1;
 
-        // Reshuffle the bag after drawing all seven pieces
+        // reshuffle the bag after drawing all seven pieces
         if self.index >= self.pieces.len() {
             self.pieces.shuffle(&mut self.rng);
             self.index = 0;
