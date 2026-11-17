@@ -7,6 +7,7 @@ use clap::Parser;
 use game::{Config, Game};
 use std::fs;
 use std::path::PathBuf;
+use std::time::Instant;
 use tetromino::{load_pieces, load_wall_kicks};
 
 mod bot;
@@ -21,6 +22,9 @@ struct Args {
 
     #[arg(long)]
     run_bot: bool,
+
+    #[arg(long, requires = "run_bot")]
+    single_threaded: bool,
 
     #[arg(long)]
     resources: PathBuf,
@@ -41,7 +45,7 @@ fn main() {
     let mut game = Game::new(config, shapes, wall_kicks);
 
     if args.run_bot {
-        run_bot(&mut game);
+        run_bot(&mut game, args.single_threaded);
     } else if let Some(path) = args.simulate_inputs_single_player {
         // Process each input as one frame.
         let inputs = fs::read_to_string(path).expect("Could not read input file");
@@ -55,9 +59,13 @@ fn main() {
     print!("{}", game.render());
 }
 
-fn run_bot(game: &mut Game) {
+fn run_bot(game: &mut Game, single_threaded: bool) {
     let mut bot = SimpleBot::new();
+    bot.multithreaded = !single_threaded;
     let mut frames = 0;
+    let mut total_seconds = 0.0;
+    let mut slowest_seconds = 0.0;
+    let game_start = Instant::now();
 
     while !game.game_over && game.lines_cleared < 40 && frames < 100_000 {
         let mut board = [[CellState::Empty; 10]; 20];
@@ -88,7 +96,15 @@ fn run_bot(game: &mut Game) {
             board,
         };
 
-        let action = match bot.get_move(&state) {
+        let start = Instant::now();
+        let bot_action = bot.get_move(&state);
+        let seconds = start.elapsed().as_secs_f64();
+        total_seconds += seconds;
+        if seconds > slowest_seconds {
+            slowest_seconds = seconds;
+        }
+
+        let action = match bot_action {
             TetrisAction::L => 'L',
             TetrisAction::R => 'R',
             TetrisAction::C => 'C',
@@ -101,6 +117,8 @@ fn run_bot(game: &mut Game) {
         frames += 1;
     }
 
+    let game_seconds = game_start.elapsed().as_secs_f64();
+
     if game.game_over {
         println!("Bot topped out.");
     } else if game.lines_cleared >= 40 {
@@ -110,4 +128,10 @@ fn run_bot(game: &mut Game) {
     }
     println!("Lines cleared: {}", game.lines_cleared);
     println!("Frames: {}", frames);
+    println!("Game time: {:.6} seconds", game_seconds);
+    println!("Total bot time: {:.6} seconds", total_seconds);
+    if frames > 0 {
+        println!("Average move: {:.3} ms", total_seconds / frames as f64 * 1000.0);
+    }
+    println!("Slowest move: {:.3} ms", slowest_seconds * 1000.0);
 }
