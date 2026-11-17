@@ -22,6 +22,7 @@ pub struct Game {
     pub gravity_timer: u32,
     pub lock_timer: u32,
     pub game_over: bool,
+    pub lines_cleared: usize,
 }
 
 impl Game {
@@ -41,6 +42,7 @@ impl Game {
             gravity_timer: 0,
             lock_timer: 0,
             game_over: false,
+            lines_cleared: 0,
         }
     }
 
@@ -148,7 +150,7 @@ impl Game {
             return;
         }
 
-        self.board.remove_full_rows();
+        self.lines_cleared += self.board.remove_full_rows();
 
         self.current_piece = Tetromino::new(self.piece_bag.next_piece());
         self.gravity_timer = 0;
