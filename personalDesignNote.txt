@@ -1,0 +1,2 @@
+- Search moves/rotates the current piece, scores a hard drop on a board copy, and skips visited positions. Only looks one piece ahead.
+- Search ignores gravity/lock timing and downward moves. Replans each frame, but might aim for a spot gravity makes unreachable (like crossing a tall wall).

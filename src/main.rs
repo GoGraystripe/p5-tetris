@@ -8,6 +8,11 @@ use std::fs;
 use std::path::PathBuf;
 use tetromino::{load_pieces, load_wall_kicks};
 
+mod bot;
+
+#[cfg(test)]
+mod tests;
+
 #[derive(Parser)]
 struct Args {
     #[arg(long)]
