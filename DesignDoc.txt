@@ -1,0 +1,25 @@
+Architecture:
+Describe the modules you wrote and any important structs or traits.
+Describe how they interact and any invariants you maintain between them.
+
+Implementation:
+Describe any interesting algorithms you use or otherwise creative or non-obvious implementation decisions.
+Explain where your code has performance bottlenecks and how you identified them. Profile your code to support your argument.
+What was your bot's algorithm? If you read anything which inspired it, please cite it (just a link and brief description of what you used from the resource is fine).
+
+Testing:
+Describe how you tested your design.
+What parts of your project did you devote more or less verification effort towards?
+
+Work Credit: If you worked in a group, say who did what.
+
+Known Issues: If there is something you know doesn't work, describe it here.
+
+AI Usage: If you used any AI tools describe how you used them. We are curious how you use the tools, especially given the limiting AI policy.
+
+Meta Comments: Write any opinions on the assignment. Some things we are curious about are
+How long did you spend on the assignment, which parts took the longest?
+
+What did you like and dislike about the assignment, why?
+
+Is there anything you'd like to change about the assignment?

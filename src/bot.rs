@@ -1,46 +1,96 @@
 use crate::board::{Board, HEIGHT, WIDTH};
-use crate::tetromino::{PieceShape, PieceShapes, WallKicks};
+use crate::game::Game;
+use crate::tetromino::PieceShape;
 use std::collections::{HashMap, HashSet};
+use std::path::Path;
 use std::sync::{Arc, mpsc};
 use std::thread;
 
-pub enum TetrominoType {
-    I, J, L, O, S, Z, T
+pub struct GarbageLine {
+    pub num_rows_to_create: usize,
+    pub ticks_till_applied: usize,
 }
 
+pub trait MultiPlayerBot {
+    fn new(config: &Path) -> Self;
+    fn get_move(&self) -> TetrisAction;
+    fn update_with(&mut self, p_actions: &[TetrisAction]);
+}
 
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum TetrisAction {
     C, W, L, R, D, H, E
 }
 
-#[derive(Clone, Copy, PartialEq)]
-pub enum CellState {
-    Filled, Empty
-}
-
-pub struct BoardState {
-    pub tetromino_row: usize,
-    pub tetromino_col: usize,
-    pub tetromino_rotation: usize,
-    pub tetromino: TetrominoType,
-    pub board: [[CellState; 10]; 20],
+impl TetrisAction {
+    pub fn as_char(self) -> char {
+        match self {
+            Self::C => 'C',
+            Self::W => 'W',
+            Self::L => 'L',
+            Self::R => 'R',
+            Self::D => 'D',
+            Self::H => 'H',
+            Self::E => 'E',
+        }
+    }
 }
 
 pub trait SinglePlayerBot {
-    /// Create a new bot.
-    fn new() -> Self;
-
-    /// Gets an action to perform based on the board state. This should be called
-    /// every frame.
-    fn get_move(&mut self, board_state: &BoardState) -> TetrisAction;
+    fn new(config: &Path) -> Self;
+    fn get_move(&self) -> TetrisAction;
+    fn update_with(&mut self, action: TetrisAction);
 }
 
 pub struct SimpleBot {
-    pub multithreaded: bool,
     workers: Vec<Worker>,
-    shapes: PieceShapes,
-    wall_kicks: WallKicks,
+    pub game: Game,
+}
+
+pub struct VersusBot {
+    player: SimpleBot,
+    opponent: Game,
+    hard_drop_only: bool,
+}
+
+impl VersusBot {
+    pub fn new_bad(config: &Path) -> Self {
+        Self {
+            player: SimpleBot::with_threads(config, false),
+            opponent: Game::load(config),
+            hard_drop_only: true,
+        }
+    }
+
+    pub fn games(&self) -> (&Game, &Game) {
+        (&self.player.game, &self.opponent)
+    }
+}
+
+impl MultiPlayerBot for VersusBot {
+    fn new(config: &Path) -> Self {
+        Self {
+            player: SimpleBot::new(config),
+            opponent: Game::load(config),
+            hard_drop_only: false,
+        }
+    }
+
+    fn get_move(&self) -> TetrisAction {
+        if self.hard_drop_only {
+            return TetrisAction::H;
+        }
+        self.player.get_move()
+    }
+
+    fn update_with(&mut self, p_actions: &[TetrisAction]) {
+        Game::multiplayer_tick(
+            &mut self.player.game,
+            &mut self.opponent,
+            p_actions[0].as_char(),
+            p_actions[1].as_char(),
+        );
+    }
 }
 
 #[derive(Clone)]
@@ -108,52 +158,48 @@ impl Drop for SimpleBot {
 }
 
 impl SinglePlayerBot for SimpleBot {
-    fn new() -> Self {
-        Self {
-            multithreaded: true,
-            workers: Vec::new(),
-            shapes: serde_json::from_str(include_str!("../resources/tetrominoes.json")).expect("Invalid tetrominoes.json"),
-            wall_kicks: serde_json::from_str(include_str!("../resources/wall_kicks.json")).expect("Invalid wall_kicks.json"),
-        }
+    fn new(config: &Path) -> Self {
+        Self::with_threads(config, true)
     }
 
-    fn get_move(&mut self, state: &BoardState) -> TetrisAction {
-        // Start workers once, when first needed.
-        if self.multithreaded && self.workers.is_empty() {
+    fn get_move(&self) -> TetrisAction {
+        if self.game.game_over {
+            return TetrisAction::E;
+        }
+        self.search()
+    }
+
+    fn update_with(&mut self, action: TetrisAction) {
+        self.game.tick(action.as_char());
+    }
+}
+
+impl SimpleBot {
+    pub fn with_threads(config: &Path, multithreaded: bool) -> Self {
+        let game = Game::load(config);
+        let mut workers = Vec::new();
+        if multithreaded {
             for _ in 0..4 {
-                self.workers.push(Worker::new());
+                workers.push(Worker::new());
             }
         }
+        Self { workers, game }
+    }
 
-        let piece = match state.tetromino {
-            TetrominoType::I => "i",
-            TetrominoType::J => "j",
-            TetrominoType::L => "l",
-            TetrominoType::O => "o",
-            TetrominoType::S => "s",
-            TetrominoType::Z => "z",
-            TetrominoType::T => "t",
-        };
-        let shape = &self.shapes[piece];
-        let kicks = (&self.wall_kicks[&shape.wall_kick]);
-        let kicks = Arc::new(kicks.clone());
+    fn search(&self) -> TetrisAction {
+        let piece = &self.game.current_piece;
+        let shape = &self.game.shapes[&piece.piece_type];
+        let kicks = Arc::new(self.game.wall_kicks[&shape.wall_kick].clone());
         let shape = Arc::new(PieceShape {
             states: shape.states,
             wall_kick: shape.wall_kick.clone(),
         });
 
-        let mut board = Board::new();
-        for row in 0..HEIGHT {
-            for col in 0..WIDTH {
-                board.cells[row][col] = (state.board[row][col] == CellState::Filled);
-            }
-        }
-        let board = Arc::new(board);
-
+        let board = Arc::new(Board { cells: self.game.board.cells });
         let start = SearchPosition {
-            row: state.tetromino_row as i32,
-            col: state.tetromino_col as i32,
-            rotation: state.tetromino_rotation,
+            row: piece.row,
+            col: piece.col,
+            rotation: piece.rotation,
             first_action: None,
         };
         let mut visited = HashSet::new();
@@ -164,8 +210,8 @@ impl SinglePlayerBot for SimpleBot {
 
         while !current_depth.is_empty() {
             let mut worker_results = Vec::new();
-            if self.multithreaded {
-                let chunk_size = (current_depth.len() + 3) / 4;
+            if !self.workers.is_empty() {
+                let chunk_size = ((current_depth.len() + 3) / 4);
                 let mut jobs_sent = 0;
 
                 for chunk in current_depth.chunks(chunk_size) {
@@ -226,6 +272,7 @@ fn search_chunk(
     for position in positions {
         let row = position.row;
         let col = position.col;
+
         let rotation = position.rotation;
         let first_action = position.first_action;
         let blocks = &shape.states[rotation];
@@ -236,22 +283,25 @@ fn search_chunk(
         let mut landing_row = row;
         while board.can_place(landing_row - 1, col, blocks) {
             landing_row -= 1;
+
         }
 
         // A piece above the visible board would lose.
         let mut topped_out = false;
         for block in blocks {
-            if landing_row + block[1] >= HEIGHT as i32 {
+            if landing_row + block[1] >= (HEIGHT as i32) {
                 topped_out = true;
                 break;
             }
+
         }
 
         if !topped_out {
             let mut placed_board = Board { cells: board.cells };
             placed_board.place_piece(landing_row, col, blocks);
-            let lines = placed_board.remove_full_rows();
+            let lines =( placed_board.remove_full_rows());
             let score = score_board(&placed_board, lines);
+
             if score > result.best_score {
                 result.best_score = score;
                 result.best_action = match first_action {
@@ -284,8 +334,8 @@ fn search_chunk(
                     for i in 0..old_offsets.len() {
                         let old = old_offsets[i];
                         let new = new_offsets[i];
-                        let new_row = row + old[1] - new[1];
-                        let new_col = col + old[0] - new[0];
+                        let new_row = (row + old[1] - new[1]);
+                        let new_col = (col + old[0] - new[0]);
                         if board.can_place(new_row, new_col, &shape.states[new_rotation]) {
                             next_Row = new_row;
                             next_Col = new_col;

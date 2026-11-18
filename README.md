@@ -30,6 +30,19 @@
   new pieces to the board despite the user topping out.
 - Clean up design doc section formatting.
 
+2026-11-13
+- Fix typos in garbage spec.
+
+2026-11-16
+- Have garbage applied only after a piece locks.
+- Fix CLI command to make it more reasonable.
+- Fix bot interface to make it actually make sense.
+- Fix typo in single player bot type alias name.
+- Remove mention of multithreaded part 3, it got scrapped.
+
+2026-11-17
+- Add some larger tests.
+
 ## Introduction
 For project 5 and project 6 you will be implementing a networked Tetris game.
 If you've never played Tetris against other people try it out! It's a fun game
@@ -56,8 +69,8 @@ Project 5 will involve four parts:
 4. writing a design document
 
 For this project, we want you to implement something multithreaded for you bot
-in (2) and have clients on separate threads communicating with a "server"
-thread for part (3). We will expand in the corresponding sections.
+in (2), likely some sort of parallel tree search. We will expand in the
+corresponding section.
 
 The rest you may implement as you want, though we will load test your designs
 and the most robust teams may receive a small amount of extra credit on this or
@@ -423,54 +436,39 @@ For this part, you will implement a bot to play single player Tetris. First,
 for grading reasons you should create the following enums, structs, and trait
 as follows to module `bot` in a file `src/bot.rs`:
 ```rs
-pub enum TetrominoType {
-    I, J, L, O, S, Z, T
-}
-
+#[derive(Debug, Clone, Copy)]
 pub enum TetrisAction {
     C, W, L, R, D, H, E
 }
 
-#[derive(Clone, Copy)]
-pub enum CellState {
-    Filled, Empty
-}
-
-pub struct BoardState {
-    pub tetromino_row: usize,
-    pub tetromino_col: usize,
-    pub tetromino_rotation: usize,
-    pub tetromino: TetrominoType,
-    pub board: [[CellState; 10]; 20],
-}
-
 pub trait SinglePlayerBot {
-    /// Create a new bot.
-    fn new() -> Self;
+    /// Create a new bot given the path to the resources dir.
+    fn new(config: &Path) -> Self;
 
     /// Gets an action to perform based on the board state. This should be called
     /// every frame.
-    fn get_move(&mut self, board_state: &BoardState) -> TetrisAction;
+    fn get_move(&self) -> TetrisAction;
+
+    /// Updates the current bot state assuming the player plays a given action.
+    /// If the bot is playing, this will likely be the result of
+    /// `bot.get_move()`.
+    fn update_with(&mut self, action: TetrisAction);
 }
 ```
 
 Now, add the following unit test to `tests.rs` in your `tests` directory where
 `SinglePlayerBot` is your bot struct implementing `Bot`. It should compile.
 ```rs
-use p5_tetris::bot::{BoardState, Bot, CellState, TetrominoType};
+use p5_tetris::bot::SinglePlayerBot;
 
 pub type MySinglePlayerBot = /* TODO: Replace this comment with your bot! */;
 
 #[test]
 fn create_bot_and_get_any_action_test() {
-    let mut bot = MySinglePlayerBot::new();
-    let _ = bot.get_move(&BoardState {
-        tetromino_row: 20,
-        tetromino_col: 4,
-        tetromino_rotation: 0,
-        tetromino: TetrominoType::J,
-        board: [[CellState::Empty; 10]; 20],
-    });
+    let config_path: PathBuf = "resources".into();
+    let mut bot = MySinglePlayerBot::new(&config_path);
+    let m = bot.get_move();
+    bot.update_with(m);
 }
 ```
 
@@ -618,13 +616,16 @@ The sequence occurs after a game tick and is as follows:
 3. Let s1 = max(l1 - 1, 0), s2 = max(l2 - 1, 0)
 4. Player 2's queue gets max(s1 - g1, 0) new pieces of garbage tagged with timer
   "garbage_queue_time" from `config.json` and the oldest min(s1, g1) pieces of
-  pending garbage, not including newly added garbage this tick, is removed.
-5. Player 1's queue gets max(s2 - g1, 0) new pieces of garbage tagged with timer
+  pending garbage, not including newly added garbage this tick, are removed from
+  Player 1's queue.
+5. Player 1's queue gets max(s2 - g2, 0) new pieces of garbage tagged with timer
   "garbage_queue_time" from `config.json` and the oldest min(s2, g2) pieces of
-  pending garbage, not including the newly added garbage this tick, is removed.
-6. All garbage in each player's queue tagged with timer equal to 0 has that
-  garbage removed from the queue and applied to the bottom that player's board,
-  moving all other rows upwards.
+  pending garbage, not including the newly added garbage this tick, are removed
+  from Player 2's queue..
+6. Check if a given player had a piece lock this turn, if so: all garbage in
+  each player's queue tagged with timer equal to 0 has that garbage removed from
+  the queue and applied to the bottom that player's board, moving all other rows
+  upwards.
 7. For a player, if any cell is above at or above the 20th row (row index >=
   20), that player tops out. No further garbage should be applied to topped out
   players.
@@ -642,28 +643,22 @@ aligned garbage. The randomizers should be seeded with the random seed from
 `config.json`.
 
 ### Multiplayer Tetris Bots
-Multiplayer bots look similar to single player bots but take in the board state
-of both players as well as the garbage state of both players. Thus, they require
-a new interface. Add the following to your `bots` module (in `bot.rs`):
+Multiplayer bots look similar to single player bots but take in inputs from all
+players when updating their internal view of the game state. Thus, they require
+a new interface. Add the following to your `bots` module (in `src/bot.rs`):
 ```rs
-pub struct GarbageLine {
-    pub num_rows_to_create: usize,
-    pub ticks_till_applied: usize,
-}
-
 pub trait MultiPlayerBot {
-    /// Create a new bot.
-    fn new() -> Self;
+    /// Create a new bot given the path to the resources dir.
+    fn new(config: &Path) -> Self;
 
     /// Gets an action to perform based on the board state. This should be called
     /// every frame.
-    fn get_move(
-        &mut self,
-        p1_state: &BoardState,
-        p1_garbage: &[GarbageLine],
-        p2_state: &BoardState,
-        p2_garbage: &[GarbageLine],
-    ) -> TetrisAction;
+    fn get_move(&self) -> TetrisAction;
+
+    /// Updates the current bot state assuming the player plays a given action.
+    /// `p_actions[i]` is the action taken by player `i`. This should be called
+    /// every frame.
+    fn update_with(&mut self, p_actions: &[TetrisAction]);
 }
 ```
 
@@ -675,15 +670,10 @@ pub type MyMultiPlayerBot = /* TODO: Replace this comment with your bot! */;
 
 #[test]
 fn create_mut_bot_and_get_any_action_test() {
-    let mut bot = MyMultiPlayerBot::new();
-    let state = &BoardState {
-        tetromino_row: 20,
-        tetromino_col: 4,
-        tetromino_rotation: 0,
-        tetromino: TetrominoType::J,
-        board: [[CellState::Empty; 10]; 20],
-    };
-    let _ = bot.get_move(&state, &[], &state, &[]);
+    let config_path: PathBuf = "resources".into();
+    let mut bot = MyMultiPlayerBot::new(&config_path);
+    let m = bot.get_move();
+    bot.update_with(&[m, p5_tetris::bot::TetrisAction::E]);
 }
 ```
 
@@ -691,20 +681,20 @@ fn create_mut_bot_and_get_any_action_test() {
 We now want you to create a harness to allow two bots to play each other. This
 involves adding the following flags to your binary:
 - `--list-bots`: print a newline separated list of implemented bots
-- `--trace-bot-run <bot1> <bot1-tracefile> <bot2> <bot2-tracefile>`: print the
-  board state after `<bot1>` or `<bot2>` tops out in the output format described
-  above. Write `<bot1>`'s inputs to `<bot1-tracefile>` in the input format
-  described above and write `<bot2>`'s inputs to `<bot2-tracefile>` in the input
-  format described above.
+- `--trace-bot-run --p1 <bot1> --o1 <bot1-tracefile> --p2 <bot2> --o2 <bot2-tracefile>`:
+  print the board state after `<bot1>` or `<bot2>` tops out in the output format
+  described above. Write `<bot1>`'s inputs to `<bot1-tracefile>` in the input
+  format described above and write `<bot2>`'s inputs to `<bot2-tracefile>` in
+  the input format described above.
 
 As an example
 ```
 $ cargo run -- --list-bots
 good-bot
 bad-bot
-$ cargo run -- --trace-bot-run good-bot t1.txt bad-bot t2.txt
-...o......    ...o......
-...ooo....    .ooooooo..
+$ cargo run -- --resources resources --trace-bot-run --p1 good-bot --p2 bad-bot --o1 p1.txt --o2 p2.txt
+...o......    ..........
+...ooo....    ....oooo..
 ..........    ...oooooo.
 ..........    ....oo....
 ..........    ....oo....

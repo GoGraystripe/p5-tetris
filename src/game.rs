@@ -1,6 +1,11 @@
-use crate::board::{Board, HEIGHT};
+use crate::board::{Board, HEIGHT, TOTAL_HEIGHT, WIDTH};
+use crate::bot::GarbageLine;
 use crate::tetromino::{PieceBag, PieceShapes, Tetromino, WallKicks};
+use rand::{Rng, SeedableRng};
+use rand_xoshiro::Xoshiro128PlusPlus;
 use serde::Deserialize;
+use std::fs;
+use std::path::Path;
 
 #[derive(Deserialize)]
 pub struct Config {
@@ -8,6 +13,8 @@ pub struct Config {
     pub gravity_decrease: u32,
     pub lock_delay: u32,
     pub random_seed: [u8; 16],
+    #[serde(default)]
+    pub garbage_queue_time: usize,
 }
 
 pub struct Game {
@@ -23,9 +30,21 @@ pub struct Game {
     pub lock_timer: u32,
     pub game_over: bool,
     pub lines_cleared: usize,
+    pub garbage: Vec<GarbageLine>,
+    garbage_queue_time: usize,
+    garbage_rng: Xoshiro128PlusPlus,
 }
 
 impl Game {
+    pub fn load(resources: &Path) -> Self {
+        let config_path = resources.join("config.json");
+        let config_file = fs::read_to_string(config_path).expect("Could not read config.json");
+        let config: Config = serde_json::from_str(&config_file).expect("Invalid config.json");
+        let shapes = crate::tetromino::load_pieces(resources);
+        let wall_kicks = crate::tetromino::load_wall_kicks(resources);
+        Self::new(config, shapes, wall_kicks)
+    }
+
     pub fn new(config: Config, shapes: PieceShapes, wall_kicks: WallKicks) -> Self {
         let mut piece_bag = PieceBag::new(config.random_seed);
         let first_piece = Tetromino::new(piece_bag.next_piece());
@@ -43,6 +62,83 @@ impl Game {
             lock_timer: 0,
             game_over: false,
             lines_cleared: 0,
+            garbage: Vec::new(),
+            garbage_queue_time: config.garbage_queue_time,
+            garbage_rng: Xoshiro128PlusPlus::from_seed(config.random_seed),
+        }
+    }
+
+    pub fn multiplayer_tick(one: &mut Self, two: &mut Self, action_one: char, action_two: char) {
+        let lines_one = one.lines_cleared;
+        let lines_two = two.lines_cleared;
+        let locked_one = one.tick(action_one);
+        let locked_two = two.tick(action_two);
+
+        // Cancel old garbage before either player receives new garbage.
+        let send_one = one.cancel_garbage(one.lines_cleared - lines_one);
+        let send_two = two.cancel_garbage(two.lines_cleared - lines_two);
+        one.queue_garbage(send_two);
+        two.queue_garbage(send_one);
+        if locked_one {
+            one.apply_garbage();
+        }
+        if locked_two {
+            two.apply_garbage();
+        }
+        one.count_down_garbage();
+        two.count_down_garbage();
+    }
+
+    fn cancel_garbage(&mut self, lines_cleared: usize) -> usize {
+        if lines_cleared < 2 {
+            return 0;
+        }
+        let mut rows = lines_cleared - 1;
+        while rows > 0 && !self.garbage.is_empty() {
+            let canceled = rows.min(self.garbage[0].num_rows_to_create);
+            self.garbage[0].num_rows_to_create -= canceled;
+            rows -= canceled;
+            if self.garbage[0].num_rows_to_create == 0 {
+                self.garbage.remove(0);
+            }
+        }
+        rows
+    }
+
+    fn queue_garbage(&mut self, rows: usize) {
+        if rows > 0 && !self.game_over {
+            self.garbage.push(GarbageLine {
+                num_rows_to_create: rows,
+                ticks_till_applied: self.garbage_queue_time,
+            });
+        }
+    }
+
+    fn apply_garbage(&mut self) {
+        while !self.game_over && !self.garbage.is_empty() && self.garbage[0].ticks_till_applied == 0 {
+            let batch = self.garbage.remove(0);
+            let hole = self.garbage_rng.next_u32() as usize % WIDTH;
+
+            for _ in 0..batch.num_rows_to_create {
+                for row in (1..TOTAL_HEIGHT).rev() {
+                    self.board.cells[row] = self.board.cells[row - 1];
+                }
+                self.board.cells[0] = [true; WIDTH];
+                self.board.cells[0][hole] = false;
+
+                if self.board.cells[HEIGHT].contains(&true) {
+                    self.game_over = true;
+                    break;
+                }
+            }
+        }
+    }
+
+    fn count_down_garbage(&mut self) {
+        for batch in &mut self.garbage {
+            if batch.ticks_till_applied > 0 {
+                batch.ticks_till_applied -= 1;
+            }
         }
     }
 
@@ -165,9 +261,10 @@ impl Game {
         }
     }
 
-    pub fn tick(&mut self, action: char) {
+    // Return whether the current piece locked this frame.
+    pub fn tick(&mut self, action: char) -> bool {
         if self.game_over {
-            return;
+            return false;
         }
 
         match action {
@@ -177,7 +274,7 @@ impl Game {
             'W' => self.rotate(false),
             'H' => {
                 self.hard_drop();
-                return;
+                return true;
             }
             'D' | 'E' => {}
             _ => {}
@@ -187,7 +284,11 @@ impl Game {
 
         // Soft drop temporarily reduces the gravity interval, but does not reset the gravity timer
         let gravity_interval = if action == 'D' {
-            self.gravity.saturating_sub(self.gravity_decrease).max(1)
+            if self.gravity > self.gravity_decrease {
+                self.gravity - self.gravity_decrease
+            } else {
+                1
+            }
         } else {
             self.gravity.max(1)
         };
@@ -206,10 +307,12 @@ impl Game {
 
             if self.lock_timer >= self.lock_delay {
                 self.lock_piece();
+                return true;
             }
         } else {
             self.lock_timer = 0;
         }
+        false
     }
 
     pub fn render(&self) -> String {
