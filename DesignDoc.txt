@@ -1,25 +1,97 @@
 Architecture:
-Describe the modules you wrote and any important structs or traits.
-Describe how they interact and any invariants you maintain between them.
+
+- main.rs is the entry point. Args stores the selected mode, resource path, and
+  any replay files or bot names. Replay mode reads one action per frame. In a
+  bot match, main.rs asks both bots for their moves before it updates either
+  bot. It writes the moves to trace files and prints the final boards.
+- lib.rs exposes the bot and game modules. The command-line program and
+  integration tests use the same code through this library.
+- game.rs defines Game. It owns the board, current piece, piece bag, gravity and
+  lock timers, and garbage queue. config comes from config.json and supplies the
+  timing settings and random seed. Game::tick applies one sction and reports
+  whether a piece locked, even if it cleared zero lines. Each GarbageLine entry
+  records a batch's remaining row count and wait time. We choose the hole column
+  when the batch is added to the board.
+- board.rs defines Board, which stores settled squares in a 10-by-22 grid. Each
+  cell is a bool. Board checks whether all four squares of a piece fit, clears
+  full rows, and draws the board. Row 0 is the floor. The top two rows are
+  hidden during play but appear in the replay output. The active piece is drawn
+  over the board and enters the stored grid only when it locks.
+- tetromino.rs defines Tetromino, which holds the current piece's type,
+  position, and rotation. PieceShape gives four cell offsets per rotation. Game
+  uses those offsets and the wall-kick data to check moves. PieceBag deals one
+  of each of the seven pieces per bag and uses a fixed seed so that the same
+  config and actions can be replayed.
+- bot.rs defines TetrisAction, an enum for the seven inputs. The CLI saves each
+  action as a character in the trace. SimpleBot owns one Game and the search
+  workers. It implements SinglePlayerBot. VersusBot wraps SimpleBot, adds the
+  opponent's Game, and implements MultiPlayerBot. good-bot uses the search, and
+  bad-bot always hard-drops.
+
+
+The search uses these structs to pass work between the bot and its threads:
+
+- SearchPosition holds the row, column, rotation, and first move on the route to
+  that position. Keeping the first move lets the bot return one action without
+  storing the whole route.
+- SearchJob holds the positions assigned to one worker, plus shared read-only
+  access to the board, piece shape, and wall-kick data. A worker copies the
+  board when it tries a placement.
+- WorkerResult contains the neighboring positions and the best score and first
+  action from that job. The main thread combines results and owns the set of
+  visited positions.
+- Worker holds a channel for sending jobs, one for receiving results, and a
+  thread handle. Each worker waits for another job after it returns a result.
+  SimpleBot signals and joins the workers when it is dropped.
 
 Implementation:
-Describe any interesting algorithms you use or otherwise creative or non-obvious implementation decisions.
-Explain where your code has performance bottlenecks and how you identified them. Profile your code to support your argument.
-What was your bot's algorithm? If you read anything which inspired it, please cite it (just a link and brief description of what you used from the resource is fine).
+
+The bot uses breadth-first search for the current piece. At each position, it
+tries a hard drop on a copy of the board and clears any full rows. It rewards
+line clears and penalizes tall columns, holes, and uneven heights. It saves the
+first action that leads to the highest-scoring placement.
+
+The workers each search part of one depth. The main thread collects results in
+worker order and removes duplicate positions before starting the next depth.
+This keeps tie-breaking predictable. The workers stay alive between moves so we
+don't have to start new threads at every depth.
+
+We timed five release runs in each mode with the same seed. Both modes cleared
+40 lines in 445 frames. The median total time spent choosing moves was 43.8 ms
+with the worker pool and 6.1 ms with sequential search. For this small search,
+splitting the work cost more than it saved. These timings compare the modes.
+They don't isolate time spent waiting on the channels.
+
+Reference: P5 README, Part 2, Algorithm Advice. We used its suggestion to try
+possible moves and score the resulting boards.
 
 Testing:
-Describe how you tested your design.
-What parts of your project did you devote more or less verification effort towards?
+We checked the final boards against 16 single-player fixtures and six
+multiplayer fixtures. We ran the two bot interface tests and replayed the traces
+from a good-bot versus bad-bot match. The replay gave the same final boards as
+the live match. We also tried 30 extra seeds in sequential mode, and the bot
+cleared 40 lines on each one.
+
+We spent more time checking replay and garbage behavior than measuring
+performance on different machines. We measured bot timing locally.
 
 Work Credit: If you worked in a group, say who did what.
+[Naijei Jiang, NJ277]: Bot search, placement scoring, and gameplay checks
+[Grant Lin, GL537]: Worker pool, thread coordination, and performance
+  measurements
+[Otto ___, ___]: Multiplayer replay, garbage handling, and bot match traces
+[Arielle Nudelman, an585]: Single-player simulator, board rules, and replay
+  tests
 
-Known Issues: If there is something you know doesn't work, describe it here.
+Known Issues:
+The search doesn't advance gravity or the lock timer between trial moves. It
+might pick a route over a tall stack that the piece can't finish before it
+drops. The bot searches again next frame from the actual position.
 
-AI Usage: If you used any AI tools describe how you used them. We are curious how you use the tools, especially given the limiting AI policy.
+AI Usage: Used to review multi-threading and channels in rust
 
-Meta Comments: Write any opinions on the assignment. Some things we are curious about are
-How long did you spend on the assignment, which parts took the longest?
-
-What did you like and dislike about the assignment, why?
-
-Is there anything you'd like to change about the assignment?
+Meta Comments:
+~20h total. 2 took the longest because of recent changes to assignment code
+causing code refactoring. We liked part 2 because implementing our own algorithm
+was super interesting especially as performance was a main factor. We wished
+this assignment was more structured.
